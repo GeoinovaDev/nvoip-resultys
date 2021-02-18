@@ -50,7 +50,7 @@ func (q *QueueTime) _run() {
 		time.Sleep(time.Duration(q.Interval) * time.Millisecond)
 		fn, called := q.Pop()
 		if called {
-			fn()
+			go fn()
 		}
 	}
 }
