@@ -42,6 +42,7 @@ type ResponseParameter struct {
 type Client struct {
 	AccessToken string
 	CallerID    string
+	Timeout     int
 	qtime       *queuetime.QueueTime
 }
 
@@ -70,7 +71,9 @@ func (c *Client) Call(param RequestParameter) (*ResponseParameter, error) {
 	}
 
 	rq := request.New("https://api.nvoip.com.br/v1/torpedo/dtmf/dynamic")
-	rq.SetTimeout(5 * 60)
+	if c.Timeout > 0 {
+		rq.SetTimeout(c.Timeout)
+	}
 	rq.AddHeader("Accept", "application/json")
 	rq.AddHeader("Content-Type", "application/json")
 	rq.AddHeader("token_auth", c.AccessToken)
