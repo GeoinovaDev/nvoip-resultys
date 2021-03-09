@@ -6,14 +6,17 @@ import (
 
 	"git.resultys.com.br/lib/lower/convert/decode"
 	"git.resultys.com.br/lib/lower/net/request"
+	"git.resultys.com.br/sdk/nvoip-golang/queuecapacity"
 	"git.resultys.com.br/sdk/nvoip-golang/queuetime"
 )
 
+// AudioParameter ...
 type AudioParameter struct {
 	TextOrAudioUrl string `json:"audio"`
 	Position       int    `json:"positionAudio"`
 }
 
+// DtmfParameter ...
 type DtmfParameter struct {
 	TextOrAudioUrl string `json:"audio"`
 	Position       int    `json:"positionAudio"`
@@ -23,6 +26,7 @@ type DtmfParameter struct {
 	MaxNumberKey   string `json:"max"`
 }
 
+// RequestParameter ...
 type RequestParameter struct {
 	PhoneFrom string           `json:"caller"`
 	PhoneTo   string           `json:"called"`
@@ -30,6 +34,7 @@ type RequestParameter struct {
 	Dtmf      []DtmfParameter  `json:"dtmf"`
 }
 
+// ResponseParameter ...
 type ResponseParameter struct {
 	UUID      string `json:"uuid"`
 	Status    string `json:"status"`
@@ -44,27 +49,48 @@ type Client struct {
 	CallerID    string
 	Timeout     int
 	qtime       *queuetime.QueueTime
+	qcapacity   *queuecapacity.QueueCapacity
 }
 
-func New(accessToken string, totalRequestBySeconds int) *Client {
+// New ...
+func New(accessToken string, totalRequestParallel int, totalRequestBySeconds int) *Client {
 	tx := float64(1) / float64(totalRequestBySeconds)
 	interval := int(tx * float64(1000))
 
-	qtime := queuetime.New(interval)
-	qtime.Run()
-
-	return &Client{
+	client := &Client{
 		AccessToken: accessToken,
-		qtime:       qtime,
+		qtime:       queuetime.New(interval),
+		qcapacity:   queuecapacity.New(totalRequestParallel),
 	}
-}
 
-func (c *Client) CallQueued(param RequestParameter, fn func(*ResponseParameter, error)) {
-	c.qtime.Push(func() {
-		fn(c.Call(param))
+	client.qtime.Run()
+	client.qcapacity.Run()
+
+	client.qcapacity.OnPush(func(item *queuecapacity.QueueItem) {
+		client.qtime.Push(func() {
+			context := item.Context.(map[string]interface{})
+			param := context["param"].(RequestParameter)
+			fn := context["fn"].(func(*ResponseParameter, error))
+
+			response, err := client.Call(param)
+			client.qcapacity.RemoveItem(item.ID)
+			fn(response, err)
+		})
 	})
+
+	return client
 }
 
+// CallQueued ...
+func (c *Client) CallQueued(param RequestParameter, fn func(*ResponseParameter, error)) {
+	context := make(map[string]interface{})
+	context["param"] = param
+	context["fn"] = fn
+
+	c.qcapacity.AddItem(context)
+}
+
+// Call ...
 func (c *Client) Call(param RequestParameter) (*ResponseParameter, error) {
 	if len(param.PhoneFrom) == 0 {
 		param.PhoneFrom = c.CallerID
