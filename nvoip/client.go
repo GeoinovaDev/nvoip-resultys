@@ -4,10 +4,10 @@ import (
 	"strconv"
 	"strings"
 
-	"git.resultys.com.br/lib/lower/convert/decode"
-	"git.resultys.com.br/lib/lower/net/request"
-	"git.resultys.com.br/sdk/nvoip-golang/queuecapacity"
-	"git.resultys.com.br/sdk/nvoip-golang/queuetime"
+	"github.com/GeoinovaDev/lower-resultys/convert/decode"
+	"github.com/GeoinovaDev/lower-resultys/net/request"
+	"github.com/GeoinovaDev/nvoip-resultys/queuecapacity"
+	"github.com/GeoinovaDev/nvoip-resultys/queuetime"
 )
 
 // AudioParameter ...
