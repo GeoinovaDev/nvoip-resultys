@@ -3,6 +3,7 @@ package nvoip
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/GeoinovaDev/lower-resultys/convert/decode"
 	"github.com/GeoinovaDev/lower-resultys/net/request"
@@ -43,28 +44,38 @@ type ResponseParameter struct {
 	Dtmf      string `json:"dtmf"`
 }
 
+// AuthResponse ...
+type AuthResponse struct {
+	AcessToken   string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	RefreshToken string `json:"refresh_token"`
+	Expires      int    `json:"expires_in"`
+	Scope        string `json:"scope"`
+}
+
 // Client ...
 type Client struct {
-	AccessToken string
-	CallerID    string
-	Timeout     int
+	NumberSip string
+	UserToken string
+	CallerID  string
+	Timeout   int
+
+	accessToken string
 	qtime       *queuetime.QueueTime
 	qcapacity   *queuecapacity.QueueCapacity
 }
 
 // New ...
-func New(accessToken string, totalRequestParallel int, totalRequestBySeconds int) *Client {
+func New(numberSip string, userToken string, totalRequestParallel int, totalRequestBySeconds int) *Client {
 	tx := float64(1) / float64(totalRequestBySeconds)
 	interval := int(tx * float64(1000))
 
 	client := &Client{
-		AccessToken: accessToken,
-		qtime:       queuetime.New(interval),
-		qcapacity:   queuecapacity.New(totalRequestParallel),
+		NumberSip: numberSip,
+		UserToken: userToken,
+		qtime:     queuetime.New(interval),
+		qcapacity: queuecapacity.New(totalRequestParallel),
 	}
-
-	client.qtime.Run()
-	client.qcapacity.Run()
 
 	client.qcapacity.OnPush(func(item *queuecapacity.QueueItem) {
 		client.qtime.Push(func() {
@@ -76,6 +87,11 @@ func New(accessToken string, totalRequestParallel int, totalRequestBySeconds int
 			client.qcapacity.RemoveItem(item.ID)
 			fn(response, err)
 		})
+	})
+
+	go client.authWorker(func() {
+		client.qtime.Run()
+		client.qcapacity.Run()
 	})
 
 	return client
@@ -96,13 +112,13 @@ func (c *Client) Call(param RequestParameter) (*ResponseParameter, error) {
 		param.PhoneFrom = c.CallerID
 	}
 
-	rq := request.New("https://api.nvoip.com.br/v1/torpedo/dtmf/dynamic")
+	rq := request.New("https://api.nvoip.com.br/v2/torpedo/voice")
 	if c.Timeout > 0 {
 		rq.SetTimeout(c.Timeout)
 	}
 	rq.AddHeader("Accept", "application/json")
 	rq.AddHeader("Content-Type", "application/json")
-	rq.AddHeader("token_auth", c.AccessToken)
+	rq.AddHeader("Authorization", "Bearer "+c.accessToken)
 
 	response, err := rq.PostJSON(param)
 	if err != nil {
@@ -113,6 +129,47 @@ func (c *Client) Call(param RequestParameter) (*ResponseParameter, error) {
 	decode.JSON(response, &protocol)
 
 	return protocol, nil
+}
+
+func (c *Client) authWorker(fn func()) {
+	isFirstLoop := true
+
+	for {
+		auth, err := c.requestNewToken()
+		if err != nil {
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		c.accessToken = auth.AcessToken
+		if isFirstLoop {
+			fn()
+		}
+		isFirstLoop = false
+
+		time.Sleep(time.Duration(auth.Expires-1000) * time.Second)
+	}
+}
+
+func (c *Client) requestNewToken() (*AuthResponse, error) {
+	rq := request.New("https://api.nvoip.com.br/v2/oauth/token")
+	rq.AddHeader("Content-Type", "application/x-www-form-urlencoded")
+	rq.AddHeader("Authorization", "Basic TnZvaXBBcGlWMjpUblp2YVhCQmNHbFdNakl3TWpFPQ==")
+	data := map[string]string{}
+	data["username"] = c.NumberSip
+	data["password"] = c.UserToken
+	data["grant_type"] = "password"
+
+	response, err := rq.Post(data)
+	if err != nil {
+		return nil, err
+	}
+
+	protocol := &AuthResponse{}
+	decode.JSON(response, &protocol)
+
+	return protocol, nil
+
 }
 
 func (r *ResponseParameter) KeyPressed() int {
